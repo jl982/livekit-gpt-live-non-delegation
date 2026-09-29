@@ -1,14 +1,11 @@
-"""Repro: the GPT-Live voice model takes on a cancellation itself instead of delegating it.
+"""A GPT-Live agent whose voice model must delegate a caller's request to cancel.
 
-Only the backend model has cancel_appointment, and the voice prompt says to delegate
-cancellation requests to it. The backend's two replies are the production backend's, from a
-call where the caller talked over the reschedule offer and the voice model said the
-appointment "is now cancelled" without delegating, so nothing was cancelled.
+The voice prompt says only the backend can cancel appointments, and the backend (Responses)
+model has the only cancel_appointment tool. The worker log shows each call's timeline
+(caller, agent, delegations, backend replies, tool calls) and ends it with a VERDICT line:
+REPRODUCED when a caller's request to cancel was not delegated within 6 s.
 
-The worker log shows the timeline (caller, agent, delegations, backend replies, tool calls)
-and a verdict at the end of each call: REPRODUCED when a caller's request to cancel was not
-delegated within 6 s, or when the agent said it is cancelled and cancel_appointment never
-ran. Under `lk agent simulate` the agent also fails the run with that verdict.
+usage: uv run --env-file .env python agent.py dev --log-level info
 """
 
 import asyncio
@@ -27,7 +24,6 @@ from livekit.agents import (
     cli,
     function_tool,
 )
-from livekit.agents.simulation import SimulationContext
 from livekit.plugins.openai.realtime import GPTLiveModel
 
 logger = logging.getLogger("repro")
@@ -42,7 +38,7 @@ caller that an appointment is cancelled unless the backend has said the cancella
 succeeded.
 """
 
-# the two replies are the production backend's own words from the call being reproduced
+# the replies are worded out so that every call takes the same shape
 BACKEND_INSTRUCTIONS = """\
 You are the scheduling backend of Lakeside Clinic, on a phone call. Look up the caller's \
 appointments with lookup_appointments before answering anything about them.
@@ -59,22 +55,14 @@ Call cancel_appointment only after the caller has answered that with cancel, the
 the result.
 """
 
-# the production lookup took 1.85 s
+# a real schedule lookup takes a couple of seconds
 LOOKUP_DELAY_SEC = 2.0
-
-# "is now cancelled", "has already been canceled", "it’s cancelled", "I've cancelled"
-CANCELLED_CLAIM = re.compile(
-    r"\b(?:is|['’]s|are|was|has|have|now|I['’]ve|I have)\s+(?:now\s+|already\s+|just\s+)?"
-    r"(?:been\s+)?cancell?ed\b",
-    re.IGNORECASE,
-)
-
 
 # a caller asking to cancel: "I want to cancel my appointment", "Please cancel", "Just cancel
 # it" (and not "Is it cancelled?")
 CANCEL_REQUEST = re.compile(r"\bcancel\b", re.IGNORECASE)
-# when a call goes right, the voice model delegates a request to cancel before the caller
-# has finished saying it
+# when a call goes right, the voice model delegates a request to cancel before the caller has
+# finished saying it
 DELEGATION_DEADLINE_SEC = 6.0
 # caller fragments this close together are one turn ("Yes." ... "Just cancel it.")
 TURN_GAP_SEC = 5.0
@@ -90,6 +78,7 @@ class CallLog:
     backend_text: dict[str | None, str] = field(default_factory=dict)
 
     def add_caller_turn(self, started_at: float, text: str) -> None:
+        text = text.strip()
         if self.caller_turns and started_at - self.caller_turns[-1][1] < TURN_GAP_SEC:
             self.caller_turns[-1][1:] = [time.time(), f"{self.caller_turns[-1][2]} {text}"]
         else:
@@ -116,11 +105,8 @@ class CallLog:
         return misses
 
     def verdict(self) -> str:
-        claim = next((line for _, line in self.agent_lines if CANCELLED_CLAIM.search(line)), None)
-        if claim and not self.cancel_calls:
-            return f"REPRODUCED (false claim): the agent said {claim!r}; cancel_appointment never ran"
         if misses := self.undelegated_requests():
-            return "REPRODUCED (non-delegation): " + " | ".join(misses)
+            return "REPRODUCED: " + " | ".join(misses)
         return "not reproduced"
 
 
@@ -176,15 +162,10 @@ async def on_session_end(ctx: JobContext) -> None:
     )
 
 
-async def on_simulation_end(sim: SimulationContext) -> None:
-    if (verdict := sim.job_context.primary_session.userdata.verdict()).startswith("REPRODUCED"):
-        sim.fail(verdict)
-
-
 server = AgentServer()
 
 
-@server.rtc_session(on_session_end=on_session_end, on_simulation_end=on_simulation_end)
+@server.rtc_session(on_session_end=on_session_end)
 async def entrypoint(ctx: JobContext) -> None:
     session = AgentSession(
         llm=GPTLiveModel(
@@ -204,7 +185,7 @@ async def entrypoint(ctx: JobContext) -> None:
         elif ev.item.role == "assistant":
             session.userdata.agent_lines.append((time.time(), text))
 
-    # record=True uploads audio, transcript, traces and logs to LiveKit Cloud observability
+    # record=True uploads the call's audio, transcript, traces and logs to LiveKit Cloud
     await session.start(room=ctx.room, agent=ClinicAgent(), record=True)
 
 

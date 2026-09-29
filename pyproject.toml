@@ -1,7 +1,7 @@
 [project]
 name = "livekit-gpt-live-non-delegation"
 version = "0.1.0"
-description = "Minimal repro: the GPT-Live voice model announces a cancellation it never delegated"
+description = "Repro: the GPT-Live voice model does not delegate a caller's request to cancel"
 requires-python = ">=3.11"
 dependencies = [
     "livekit-agents[openai]==1.8.3",
