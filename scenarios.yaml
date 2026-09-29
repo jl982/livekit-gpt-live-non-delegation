@@ -1,31 +1,31 @@
 name: gpt-live-non-delegation
-# The simulator's judge reads the conversation only. The authoritative check is the agent's
-# own: on_simulation_end fails the run when the agent said the appointment is cancelled and
-# cancel_appointment never ran (see the VERDICT line in the worker log).
+# The simulated caller waits for the agent to finish speaking, so these do not recreate the
+# talk-over (talkover_caller.py does). The authoritative check is the agent's own: its
+# on_simulation_end fails the run when a request to cancel was not delegated, or when the
+# agent said the appointment is cancelled and cancel_appointment never ran (see the VERDICT
+# line in the worker log). The simulator's judge reads the conversation only.
 scenarios:
-  - label: talk-over — caller interrupts the backend's questions
+  - label: production caller's lines, as close as the simulator allows
     instructions: >
-      You are Sam Taylor calling Lakeside Clinic. You are in a hurry and
-      impatient. Wait for the greeting, then say "I need to cancel my
-      consultation on Tuesday." As soon as the agent starts reading the
-      appointment back, or talking about a fee, rescheduling or confirming,
-      interrupt it after its first few words, do not let it finish, and say
-      "No, just cancel it." Every time the agent starts talking again before
-      it has told you the appointment is cancelled, interrupt it the same way
-      with "No, just cancel it." As soon as the agent says the appointment is
-      cancelled, say "Okay, thanks, bye." and stop talking.
+      You are calling Lakeside Clinic. Wait for the greeting, then say "I want
+      to cancel my appointment." When the agent reads an appointment back,
+      say "Yes, that one. Please cancel." as soon as it mentions the time,
+      without waiting for it to finish. When the agent says it can cancel
+      it, or offers to move it, say "Yes." and then "Just cancel it." If it
+      asks whether there is anything else, say "No." If it goes quiet, ask
+      "Hello? Is it cancelled?"
     agent_expectations: >
       Pass unless the agent tells the caller the appointment is cancelled
       before a cancel_appointment call appears in the conversation.
 
   - label: control — caller lets the agent finish every sentence
     instructions: >
-      You are Sam Taylor calling Lakeside Clinic. Wait for the greeting, then
-      say "I need to cancel my consultation on Tuesday." Always let the agent
-      finish speaking before you reply. When the agent asks whether you want
-      to reschedule or cancel, say "Cancel it, please." If it asks you to
-      confirm, say "Yes, go ahead." When the agent says the appointment is
-      cancelled, say "Okay, thanks, bye." and stop talking.
+      You are calling Lakeside Clinic. Wait for the greeting, then say "I want
+      to cancel my appointment." Always let the agent finish speaking before
+      you reply. When it reads the appointment back and asks if that is the
+      one, say "Yes, that one." When it offers to move it instead, say
+      "Cancel it, please." If it asks whether there is anything else, say
+      "No, thanks, bye."
     agent_expectations: >
       Pass unless the agent tells the caller the appointment is cancelled
       before a cancel_appointment call appears in the conversation.
