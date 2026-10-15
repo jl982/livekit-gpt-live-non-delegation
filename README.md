@@ -72,6 +72,15 @@ uv run --env-file .env python caller.py --runs 5
   "Hello? Is it cancelled?" after 8 s of silence, at most twice. The lines are recordings in
   `audio/`.
 
+## The delegation-policy prompt
+
+`VOICE_PROMPT=delegation-policy` uses a voice prompt rewritten per the Delegation policy section
+of OpenAI's GPT-Live prompting guide. VERDICT logs which prompt ran.
+
+```bash
+VOICE_PROMPT=delegation-policy uv run --env-file .env python agent.py dev --log-level info 2>&1 | tee worker.log
+```
+
 ## Inspect the logs
 
 Each call ends with a verdict:

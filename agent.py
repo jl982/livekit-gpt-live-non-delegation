@@ -10,6 +10,7 @@ usage: uv run --env-file .env python agent.py dev --log-level info
 
 import asyncio
 import logging
+import os
 import re
 import time
 from dataclasses import dataclass, field
@@ -37,6 +38,28 @@ When the caller asks to cancel an appointment, delegate it to the backend. Never
 caller that an appointment is cancelled unless the backend has said the cancellation \
 succeeded.
 """
+
+# prompt in the Delegation policy form, from developers.openai.com/api/docs/guides/live-prompting
+DELEGATION_POLICY_INSTRUCTIONS = """\
+You are the phone voice of Lakeside Clinic.
+
+Delegation policy:
+Backend tools:
+- Appointments: look up the caller's appointments and cancel them.
+
+Delegate to the backend when:
+- The caller asks about their appointments or wants to cancel one.
+- The caller answers a question the backend asked, or confirms or corrects a request already in \
+progress.
+
+Do not delegate to the backend when:
+- The caller greets you or asks you to repeat a result already provided.
+- You cannot tell what they are asking for without a brief clarification.
+
+Delegate before giving an answer that depends on backend work.
+Do not guess the result while waiting.
+"""
+VOICE_PROMPT = os.getenv("VOICE_PROMPT", "default")
 
 # the replies are worded out so that every call takes the same shape
 BACKEND_INSTRUCTIONS = """\
@@ -112,7 +135,11 @@ class CallLog:
 
 class ClinicAgent(Agent):
     def __init__(self) -> None:
-        super().__init__(instructions=VOICE_INSTRUCTIONS)
+        super().__init__(
+            instructions=DELEGATION_POLICY_INSTRUCTIONS
+            if VOICE_PROMPT == "delegation-policy"
+            else VOICE_INSTRUCTIONS
+        )
 
     async def on_enter(self) -> None:
         self.duplex_session.on("openai_server_event_received", self._on_server_event)
@@ -157,7 +184,7 @@ class ClinicAgent(Agent):
 async def on_session_end(ctx: JobContext) -> None:
     log: CallLog = ctx.primary_session.userdata
     logger.info(
-        f"VERDICT: {log.verdict()} "
+        f"VERDICT: {log.verdict()} (prompt: {VOICE_PROMPT}) "
         f"(cancel_appointment calls: {log.cancel_calls}, delegations: {len(log.delegations)})"
     )
 
